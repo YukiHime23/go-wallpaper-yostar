@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/YukiHime23/go-crawal"
+	"github.com/YukiHime23/go-craw-wallpaper-ys"
 )
 
 type ResponseApi struct {

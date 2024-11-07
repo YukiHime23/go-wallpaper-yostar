@@ -8,16 +8,15 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 
-	"github.com/YukiHime23/go-crawal"
+	"github.com/YukiHime23/go-craw-wallpaper-ys"
 )
 
 type ResponseApi struct {
 	StatusCode int     `json:"code"`
 	Data       ResData `json:"data"`
-  Msg string `json:"msg"`
+	Msg        string  `json:"msg"`
 }
 
 type ResData struct {
@@ -26,22 +25,16 @@ type ResData struct {
 }
 
 type Wallpaper struct {
-	ID                int     `json:"id"`
-	Title             string  `json:"title"`
-	Type              string  `json:"type"`
-	ContentImg        string  `json:"contentImg"`
-	MobileContentImg1 string  `json:"mobileContentImg1"`
-	MobileContentImg2 string  `json:"mobileContentImg2"`
-	PcThumbnail       string  `json:"pcThumbnail"`
-	MobileThumbnail   string  `json:"mobileThumbnail"`
-	StickerURL        string  `json:"stickerUrl"`
-	Creator           string  `json:"creator"`
-}
-
-type AetherGazer struct {
-	FileName    string `json:"file_name"`
-	IdWallpaper int    `json:"id_wallpaper"`
-	Url         string `json:"url"`
+	ID                int    `json:"id"`
+	Title             string `json:"title"`
+	Type              string `json:"type"`
+	ContentImg        string `json:"contentImg"`
+	MobileContentImg1 string `json:"mobileContentImg1"`
+	MobileContentImg2 string `json:"mobileContentImg2"`
+	PcThumbnail       string `json:"pcThumbnail"`
+	MobileThumbnail   string `json:"mobileThumbnail"`
+	StickerURL        string `json:"stickerUrl"`
+	Creator           string `json:"creator"`
 }
 
 var (
@@ -49,6 +42,7 @@ var (
 )
 
 func main() {
+	fmt.Println("Start ============================> ")
 	var pathFile string
 	pathP := flag.String("path", "", "Path to the directory where wallpapers should be saved.")
 	flag.Parse()
@@ -57,6 +51,9 @@ func main() {
 	} else {
 		pathFile = *pathP
 	}
+
+	fmt.Println(pathFile)
+	panic(1)
 
 	newPath, err := crawal.CreateFolder(pathFile)
 	if err != nil {
@@ -95,18 +92,13 @@ func main() {
 		idExist = append(idExist, id)
 	}
 
-	listWallpp := make([]AetherGazer, 0)
+	listWallpp := make([]Wallpaper, 0)
 	for _, row := range resApi.Data.Rows {
 		if crawal.IntInArray(idExist, row.ID) {
 			continue
 		}
 
-		var ag AetherGazer
-		ag.Url = row.ContentImg
-		ag.FileName = strings.ReplaceAll(row.Title+" ("+row.Creator+").jpeg", "/", "-")
-		ag.IdWallpaper = row.ID
-
-		listWallpp = append(listWallpp, ag)
+		listWallpp = append(listWallpp, row)
 	}
 	var wg sync.WaitGroup
 	queue := startCraw(listWallpp)
@@ -122,46 +114,60 @@ func main() {
 }
 
 func createTable(db *sql.DB) {
+	var err error
+	// Kết nối đến cơ sở dữ liệu SQLite
+	db, err = sql.Open("sqlite3", "data-aether-gazer.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	// Kiểm tra xem bảng có tồn tại hay không, nếu không thì tạo mới
-	createTable := `
-		CREATE TABLE IF NOT EXISTS aether_gazer (
-			id_wallpaper INT PRIMARY KEY,
-			file_name VARCHAR(255) NOT NULL,
-			url VARCHAR(255) NOT NULL
+	query :=
+		`CREATE TABLE wallpapers (
+			id INT PRIMARY KEY AUTO_INCREMENT,
+			title VARCHAR(255) NOT NULL,
+			type VARCHAR(100) NOT NULL,
+			content_img VARCHAR(255) NOT NULL,
+			mobile_content_img1 VARCHAR(255) NOT NULL,
+			mobile_content_img2 VARCHAR(255) NOT NULL,
+			pc_thumbnail VARCHAR(255) NOT NULL,
+			mobile_thumbnail VARCHAR(255) NOT NULL,
+			sticker_url VARCHAR(255) NOT NULL,
+			creator VARCHAR(100) NOT NULL
 		);
 	`
-	_, err := db.Exec(createTable)
+	_, err = db.Exec(query)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
-func crawURL(db *sql.DB, queue <-chan AetherGazer, path string, wg *sync.WaitGroup) {
+func crawURL(db *sql.DB, queue <-chan Wallpaper, path string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for al := range queue {
-		if err := crawal.DownloadFile(al.Url, al.FileName, path); err != nil {
+		fName := fmt.Sprint(al.Creator, "_", al.Title)
+		if err := crawal.DownloadFile(al.ContentImg, fName, path); err != nil {
 			log.Fatal("download file error: ", err)
 		}
-		fmt.Printf(`-> download done "%s" <-`, al.FileName)
+		fmt.Printf(`-> download done "%s" <-`, fName)
 
-		insertData := "INSERT INTO aether_gazer VALUES (?, ?, ?)"
-		_, err := db.Exec(insertData, al.IdWallpaper, al.FileName, al.Url)
+		insertData := "INSERT INTO wallpapers (id, title, type, content_img, mobile_content_img1, mobile_content_img2, pc_thumbnail, mobile_thumbnail, sticker_url, creator) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+		_, err := db.Exec(insertData, al.ID, al.Title, al.Type, al.ContentImg, al.MobileContentImg1, al.MobileContentImg2, al.PcThumbnail, al.MobileThumbnail, al.StickerURL, al.Creator)
 		if err != nil {
 			log.Fatal(err)
 		}
-
 	}
 	fmt.Println("Worker done and exit")
 }
 
-func startCraw(list []AetherGazer) <-chan AetherGazer {
-	queue := make(chan AetherGazer, 100)
+func startCraw(list []Wallpaper) <-chan Wallpaper {
+	queue := make(chan Wallpaper, 100)
 
 	go func() {
 		for _, v := range list {
 			queue <- v
-			fmt.Printf("File %s has been enqueued\n", v.FileName)
+			fmt.Printf("File %s has been enqueued\n", v.Title)
 		}
 		close(queue)
 	}()
