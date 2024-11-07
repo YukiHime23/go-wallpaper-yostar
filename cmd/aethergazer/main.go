@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/YukiHime23/go-craw-wallpaper-ys"
+	craw "github.com/YukiHime23/go-craw-wallpaper-ys"
 )
 
 type ResponseApi struct {
@@ -25,7 +25,7 @@ type ResData struct {
 }
 
 type Wallpaper struct {
-	ID                int    `json:"id"`
+	GalleryID         int    `json:"gallery_id"`
 	Title             string `json:"title"`
 	Type              string `json:"type"`
 	ContentImg        string `json:"contentImg"`
@@ -42,7 +42,6 @@ var (
 )
 
 func main() {
-	fmt.Println("Start ============================> ")
 	var pathFile string
 	pathP := flag.String("path", "", "Path to the directory where wallpapers should be saved.")
 	flag.Parse()
@@ -52,10 +51,7 @@ func main() {
 		pathFile = *pathP
 	}
 
-	fmt.Println(pathFile)
-	panic(1)
-
-	newPath, err := crawal.CreateFolder(pathFile)
+	newPath, err := craw.CreateFolder(pathFile)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -75,14 +71,14 @@ func main() {
 		log.Fatal("json Unmarshal error: ", err)
 	}
 
-	db := crawal.GetSqliteDb()
-	createTable(db)
+	var db *sql.DB
+	db = createTable(db)
 
 	var idExist []int
 	// get id exist
-	ids, err := db.Query("SELECT id_wallpaper FROM aether_gazer")
+	ids, err := db.Query("SELECT gallery_id FROM `aether_gazer`")
 	if err != nil && err != sql.ErrNoRows {
-		log.Fatal("select id error: ", err)
+		log.Fatal("select gallery_id error: ", err)
 	}
 	defer ids.Close()
 
@@ -94,7 +90,7 @@ func main() {
 
 	listWallpp := make([]Wallpaper, 0)
 	for _, row := range resApi.Data.Rows {
-		if crawal.IntInArray(idExist, row.ID) {
+		if craw.IntInArray(idExist, row.GalleryID) {
 			continue
 		}
 
@@ -113,18 +109,19 @@ func main() {
 	defer db.Close()
 }
 
-func createTable(db *sql.DB) {
+func createTable(db *sql.DB) *sql.DB {
 	var err error
 	// Kết nối đến cơ sở dữ liệu SQLite
-	db, err = sql.Open("sqlite3", "data-aether-gazer.db")
+	dataSource := "/home/kiennt1/Documents/go-craw-wallpaper-ys/" + "data-aether-gazer.db"
+	db, err = sql.Open("sqlite3", dataSource)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Kiểm tra xem bảng có tồn tại hay không, nếu không thì tạo mới
 	query :=
-		`CREATE TABLE wallpapers (
-			id INT PRIMARY KEY AUTO_INCREMENT,
+		`CREATE TABLE IF NOT EXISTS aether_gazer (
+			gallery_id INT NOT NULL,
 			title VARCHAR(255) NOT NULL,
 			type VARCHAR(100) NOT NULL,
 			content_img VARCHAR(255) NOT NULL,
@@ -140,6 +137,8 @@ func createTable(db *sql.DB) {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	return db
 }
 
 func crawURL(db *sql.DB, queue <-chan Wallpaper, path string, wg *sync.WaitGroup) {
@@ -147,13 +146,13 @@ func crawURL(db *sql.DB, queue <-chan Wallpaper, path string, wg *sync.WaitGroup
 
 	for al := range queue {
 		fName := fmt.Sprint(al.Creator, "_", al.Title)
-		if err := crawal.DownloadFile(al.ContentImg, fName, path); err != nil {
+		if err := craw.DownloadFile(al.ContentImg, fName, path); err != nil {
 			log.Fatal("download file error: ", err)
 		}
 		fmt.Printf(`-> download done "%s" <-`, fName)
 
-		insertData := "INSERT INTO wallpapers (id, title, type, content_img, mobile_content_img1, mobile_content_img2, pc_thumbnail, mobile_thumbnail, sticker_url, creator) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-		_, err := db.Exec(insertData, al.ID, al.Title, al.Type, al.ContentImg, al.MobileContentImg1, al.MobileContentImg2, al.PcThumbnail, al.MobileThumbnail, al.StickerURL, al.Creator)
+		insertData := "INSERT INTO aether_gazer (gallery_id, title, type, content_img, mobile_content_img1, mobile_content_img2, pc_thumbnail, mobile_thumbnail, sticker_url, creator) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+		_, err := db.Exec(insertData, al.GalleryID, al.Title, al.Type, al.ContentImg, al.MobileContentImg1, al.MobileContentImg2, al.PcThumbnail, al.MobileThumbnail, al.StickerURL, al.Creator)
 		if err != nil {
 			log.Fatal(err)
 		}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 )
 
 func DownloadFile(URL, fileName string, pathTo string) error {
@@ -26,8 +27,9 @@ func DownloadFile(URL, fileName string, pathTo string) error {
 	if fileName == "" {
 		fileName = path.Base(URL)
 	}
-
-	file, err := os.Create(pathTo + "/" + fileName)
+	ext := filepath.Ext(URL)
+	fileName = strings.ReplaceAll(fileName, " ", "_")
+	file, err := os.Create(pathTo + "/" + fileName + ext)
 	if err != nil {
 		return err
 	}
