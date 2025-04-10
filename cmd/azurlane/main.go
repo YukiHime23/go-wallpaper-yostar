@@ -13,6 +13,7 @@ import (
 	"time"
 
 	crawal "github.com/YukiHime23/go-craw-wallpaper-ys"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // Constants for configuration
@@ -21,6 +22,7 @@ const (
 	defaultWorkerCount    = 5
 	defaultQueueSize      = 100
 	defaultRequestTimeout = 30 * time.Second
+	dbPath                = "data-azur-lane.db"
 )
 
 // ResponseApi represents the API response structure
@@ -60,6 +62,31 @@ var (
 	domainLoadWallpaperAzurLane = "https://webusstatic.yo-star.com/"
 )
 
+// initDB initializes the SQLite database and creates the necessary tables
+func initDB() (*sql.DB, error) {
+	// Connect to the SQLite database
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	// Check if the table exists, if not create it
+	createTable := `
+		CREATE TABLE IF NOT EXISTS azur_lane (
+			id_wallpaper INT PRIMARY KEY,
+			file_name VARCHAR(255) NOT NULL,
+			url VARCHAR(255) NOT NULL
+		);
+	`
+	_, err = db.Exec(createTable)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create table: %w", err)
+	}
+
+	return db, nil
+}
+
 func main() {
 	// Parse command line flags
 	pathP := flag.String("path", defaultPath, "Path to the directory where wallpapers should be saved.")
@@ -71,6 +98,13 @@ func main() {
 		log.Fatalf("Failed to create folder: %v", err)
 	}
 
+	// Initialize database
+	db, err := initDB()
+	if err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer db.Close()
+
 	// Create HTTP client with timeout
 	client := &http.Client{
 		Timeout: defaultRequestTimeout,
@@ -81,10 +115,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to fetch wallpapers: %v", err)
 	}
-
-	// Get database connection
-	db := crawal.GetSqliteDb()
-	defer db.Close()
 
 	// Get existing wallpaper IDs
 	existingIDs, err := getExistingWallpaperIDs(db)
