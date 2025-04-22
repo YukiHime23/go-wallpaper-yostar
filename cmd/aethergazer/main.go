@@ -96,20 +96,13 @@ func main() {
 	pathP := flag.String("path", defaultPath, "Path to the directory where wallpapers should be saved.")
 	flag.Parse()
 
-	// Create base output directory
-	basePath, err := craw.CreateFolder(*pathP)
-	if err != nil {
-		log.Fatalf("Failed to create base folder: %v", err)
-	}
-
 	// Create subdirectories for different image types
-	contentImgPath := filepath.Join(basePath, "contentImg")
-	mobileContentImgPath := filepath.Join(basePath, "mobileContentImg")
-
-	if err := os.MkdirAll(contentImgPath, 0755); err != nil {
+	contentImgPath, err := craw.CreateFolder(filepath.Join(*pathP, "contentImg"))
+	if err != nil {
 		log.Fatalf("Failed to create contentImg folder: %v", err)
 	}
-	if err := os.MkdirAll(mobileContentImgPath, 0755); err != nil {
+	mobileContentImgPath, err := craw.CreateFolder(filepath.Join(*pathP, "mobileContentImg"))
+	if err != nil {
 		log.Fatalf("Failed to create mobileContentImg folder: %v", err)
 	}
 
