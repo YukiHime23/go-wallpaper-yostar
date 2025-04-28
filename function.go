@@ -2,6 +2,7 @@ package crawal
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,51 +21,50 @@ const (
 
 // DownloadFile downloads a file from the given URL and saves it to the specified path
 // with the given filename. If the filename is empty, it uses the base name from the URL.
-func DownloadFile(URL, fileName string, pathTo string) error {
+func DownloadFile(url, fileName string, pathTo string) error {
 	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: defaultTimeout,
-	}
+	client := &http.Client{Timeout: defaultTimeout}
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// Create request with context
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, URL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
 	// Send request
-	response, err := client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to download file: %w", err)
 	}
-	defer response.Body.Close()
+	defer resp.Body.Close()
 
 	// Check response status
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("received non-200 response code: %d", response.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("received non-200 response code: %d", resp.StatusCode)
 	}
 
 	// Determine filename
 	if fileName == "" {
-		fileName = path.Base(URL)
+		fileName = path.Base(url)
 	}
 
 	// Get file extension from URL if not already present
-	ext := filepath.Ext(URL)
-	if ext == "" && !strings.Contains(fileName, ".") {
+	ext := filepath.Ext(fileName)
+	if ext == "" {
 		// Try to determine extension from Content-Type
-		contentType := response.Header.Get("Content-Type")
-		if strings.Contains(contentType, "jpeg") || strings.Contains(contentType, "jpg") {
+		contentType := resp.Header.Get("Content-Type")
+		switch {
+		case strings.Contains(contentType, "jpeg") || strings.Contains(contentType, "jpg"):
 			ext = ".jpg"
-		} else if strings.Contains(contentType, "png") {
+		case strings.Contains(contentType, "png"):
 			ext = ".png"
-		} else if strings.Contains(contentType, "gif") {
+		case strings.Contains(contentType, "gif"):
 			ext = ".gif"
-		} else if strings.Contains(contentType, "webp") {
+		case strings.Contains(contentType, "webp"):
 			ext = ".webp"
 		}
 	}
@@ -85,7 +85,7 @@ func DownloadFile(URL, fileName string, pathTo string) error {
 	defer file.Close()
 
 	// Write the bytes to the file
-	_, err = io.Copy(file, response.Body)
+	_, err = io.Copy(file, resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
@@ -122,4 +122,43 @@ func CreateFolder(path string) (string, error) {
 
 	fmt.Println("New folder created at:", newFolderPath)
 	return newFolderPath, nil
+}
+
+// FetchApi fetches data from the API
+func FetchApi(client *http.Client, url string) ([]byte, error) {
+	res, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("API request failed: %w", err)
+	}
+	defer res.Body.Close()
+
+	resBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	return resBody, nil
+}
+
+// GetExistingWallpaperIDs retrieves the IDs of wallpapers already in the database
+func GetExistingWallpaperIDs(db *sql.DB, query string) ([]int, error) {
+	ids, err := db.Query(query)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return []int{}, nil
+		}
+		return nil, err
+	}
+	defer ids.Close()
+
+	var existingIDs []int
+	for ids.Next() {
+		var id int
+		if err := ids.Scan(&id); err != nil {
+			return nil, err
+		}
+		existingIDs = append(existingIDs, id)
+	}
+
+	return existingIDs, nil
 }

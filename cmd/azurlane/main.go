@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	crawal "github.com/YukiHime23/go-craw-wallpaper-ys"
+	craw "github.com/YukiHime23/go-craw-wallpaper-ys"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -93,7 +92,7 @@ func main() {
 	flag.Parse()
 
 	// Create output directory
-	newPath, err := crawal.CreateFolder(*pathP)
+	newPath, err := craw.CreateFolder(*pathP)
 	if err != nil {
 		log.Fatalf("Failed to create folder: %v", err)
 	}
@@ -111,13 +110,13 @@ func main() {
 	}
 
 	// Fetch wallpaper list
-	wallpapers, err := fetchWallpapers(client)
+	wallpapers, err := fetchWallpapers(client, apiListWallpaperAzurLane)
 	if err != nil {
 		log.Fatalf("Failed to fetch wallpapers: %v", err)
 	}
 
 	// Get existing wallpaper IDs
-	existingIDs, err := getExistingWallpaperIDs(db)
+	existingIDs, err := craw.GetExistingWallpaperIDs(db, "SELECT id_wallpaper FROM azur_lane")
 	if err != nil {
 		log.Fatalf("Failed to get existing wallpaper IDs: %v", err)
 	}
@@ -150,16 +149,10 @@ func main() {
 }
 
 // fetchWallpapers retrieves the list of wallpapers from the API
-func fetchWallpapers(client *http.Client) ([]Wallpaper, error) {
-	res, err := client.Get(apiListWallpaperAzurLane)
+func fetchWallpapers(client *http.Client, url string) ([]Wallpaper, error) {
+	resBody, err := craw.FetchApi(client, url)
 	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
-	}
-	defer res.Body.Close()
-
-	resBody, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, fmt.Errorf("failed to fetch wallpapers: %w", err)
 	}
 
 	var resApi ResponseApi
@@ -170,34 +163,11 @@ func fetchWallpapers(client *http.Client) ([]Wallpaper, error) {
 	return resApi.Data.Rows, nil
 }
 
-// getExistingWallpaperIDs retrieves the IDs of wallpapers already in the database
-func getExistingWallpaperIDs(db *sql.DB) ([]int, error) {
-	ids, err := db.Query("SELECT id_wallpaper FROM azur_lane")
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return []int{}, nil
-		}
-		return nil, err
-	}
-	defer ids.Close()
-
-	var existingIDs []int
-	for ids.Next() {
-		var id int
-		if err := ids.Scan(&id); err != nil {
-			return nil, err
-		}
-		existingIDs = append(existingIDs, id)
-	}
-
-	return existingIDs, nil
-}
-
 // filterNewWallpapers filters out wallpapers that already exist in the database
 func filterNewWallpapers(wallpapers []Wallpaper, existingIDs []int) []AzurLane {
 	listWallpp := make([]AzurLane, 0, len(wallpapers))
 	for _, row := range wallpapers {
-		if crawal.IntInArray(existingIDs, row.ID) {
+		if craw.IntInArray(existingIDs, row.ID) {
 			continue
 		}
 
@@ -226,7 +196,7 @@ func crawURL(db *sql.DB, queue <-chan AzurLane, path string, wg *sync.WaitGroup)
 
 	for al := range queue {
 		// Download the file
-		if err := crawal.DownloadFile(al.Url, al.FileName, path); err != nil {
+		if err := craw.DownloadFile(al.Url, al.FileName, path); err != nil {
 			log.Printf("Error downloading file %s: %v", al.FileName, err)
 			continue
 		}

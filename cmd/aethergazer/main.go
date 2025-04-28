@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -125,7 +123,7 @@ func main() {
 	}
 
 	// Get existing wallpaper IDs
-	existingIDs, err := getExistingWallpaperIDs(db)
+	existingIDs, err := craw.GetExistingWallpaperIDs(db, "SELECT id FROM aether_gazer")
 	if err != nil {
 		log.Fatalf("Failed to get existing wallpaper IDs: %v", err)
 	}
@@ -159,15 +157,9 @@ func main() {
 
 // fetchWallpapers retrieves the list of wallpapers from the API
 func fetchWallpapers(client *http.Client) ([]Wallpaper, error) {
-	res, err := client.Get(apiListWallpaperAetherGazer)
+	resBody, err := craw.FetchApi(client, apiListWallpaperAetherGazer)
 	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
-	}
-	defer res.Body.Close()
-
-	resBody, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, fmt.Errorf("failed to fetch wallpapers: %w", err)
 	}
 
 	var resApi ResponseApi
@@ -176,29 +168,6 @@ func fetchWallpapers(client *http.Client) ([]Wallpaper, error) {
 	}
 
 	return resApi.Data.Rows, nil
-}
-
-// getExistingWallpaperIDs retrieves the IDs of wallpapers already in the database
-func getExistingWallpaperIDs(db *sql.DB) ([]int, error) {
-	ids, err := db.Query("SELECT id FROM aether_gazer")
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return []int{}, nil
-		}
-		return nil, err
-	}
-	defer ids.Close()
-
-	var existingIDs []int
-	for ids.Next() {
-		var id int
-		if err := ids.Scan(&id); err != nil {
-			return nil, err
-		}
-		existingIDs = append(existingIDs, id)
-	}
-
-	return existingIDs, nil
 }
 
 // prepareImagesForDownload prepares the list of images to download
@@ -242,73 +211,13 @@ func prepareImagesForDownload(wallpapers []Wallpaper, existingIDs []int, content
 func downloadWorker(queue <-chan ImageDownload, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: defaultRequestTimeout,
-	}
-
 	for img := range queue {
 		// Download the file
-		if err := downloadImage(client, img.URL, img.FileName, img.Path); err != nil {
+		if err := craw.DownloadFile(img.URL, img.FileName, img.Path); err != nil {
 			log.Printf("Error downloading image %s: %v", img.FileName, err)
 			continue
 		}
 		log.Printf(`-> download done "%s" <-`, img.FileName)
 	}
 	log.Println("Worker done and exit")
-}
-
-// downloadImage downloads an image from the given URL and saves it to the specified path
-func downloadImage(client *http.Client, URL, fileName string, pathTo string) error {
-	// Create request
-	req, err := http.NewRequest(http.MethodGet, URL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Send request
-	response, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to download image: %w", err)
-	}
-	defer response.Body.Close()
-
-	// Check response status
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("received non-200 response code: %d", response.StatusCode)
-	}
-
-	// Get file extension from URL if not already present
-	ext := filepath.Ext(URL)
-	if ext == "" {
-		// Try to determine extension from Content-Type
-		contentType := response.Header.Get("Content-Type")
-		if strings.Contains(contentType, "jpeg") || strings.Contains(contentType, "jpg") {
-			ext = ".jpg"
-		} else if strings.Contains(contentType, "png") {
-			ext = ".png"
-		} else if strings.Contains(contentType, "gif") {
-			ext = ".gif"
-		} else if strings.Contains(contentType, "webp") {
-			ext = ".webp"
-		}
-	}
-
-	// Create full file path
-	fullPath := filepath.Join(pathTo, fileName+ext)
-
-	// Create the file
-	file, err := os.Create(fullPath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-	defer file.Close()
-
-	// Write the bytes to the file
-	_, err = io.Copy(file, response.Body)
-	if err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
-	}
-
-	return nil
 }
