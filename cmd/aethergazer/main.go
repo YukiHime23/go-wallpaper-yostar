@@ -8,7 +8,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
-	"strings"
+	"slices"
 	"sync"
 	"time"
 
@@ -26,20 +26,20 @@ const (
 )
 
 // ResponseApi represents the API response structure
-type ResponseApi struct {
+type responseApi struct {
 	Code int     `json:"code"`
-	Data ResData `json:"data"`
+	Data resData `json:"data"`
 	Msg  string  `json:"msg"`
 }
 
 // ResData represents the data structure in the API response
-type ResData struct {
+type resData struct {
 	Count int         `json:"count"`
-	Rows  []Wallpaper `json:"rows"`
+	Rows  []wallpaper `json:"rows"`
 }
 
 // Wallpaper represents a wallpaper item from the API
-type Wallpaper struct {
+type wallpaper struct {
 	ID                int    `json:"id"`
 	Title             string `json:"title"`
 	Type              string `json:"type"`
@@ -50,44 +50,17 @@ type Wallpaper struct {
 }
 
 // ImageDownload represents an image to be downloaded
-type ImageDownload struct {
-	URL      string
-	FileName string
-	Path     string
+type imageDownload struct {
+	IdGallery string `json:"id_gallery"`
+	URL       string `json:"url"`
+	FileName  string `json:"file_name"`
+	Path      string `json:"path"`
+	Type      string `json:"type"`
 }
 
 var (
-	apiListWallpaperAetherGazer = "https://aethergazer.com/api/gallery/list?pageIndex=1&pageNum=1200&type=wallpaper"
+	apiListWallpaperAetherGazer = "https://aethergazer.com/api/gallery/list?pageIndex=1&pageNum=12000&type=wallpaper"
 )
-
-// initDB initializes the SQLite database and creates the necessary tables
-func initDB() (*sql.DB, error) {
-	// Connect to the SQLite database
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
-	// Check if the table exists, if not create it
-	createTable := `
-		CREATE TABLE IF NOT EXISTS aether_gazer (
-			id INT PRIMARY KEY,
-			title VARCHAR(255) NOT NULL,
-			type VARCHAR(100) NOT NULL,
-			content_img VARCHAR(255) NOT NULL,
-			mobile_content_img1 VARCHAR(255),
-			sticker_url VARCHAR(255),
-			creator VARCHAR(100)
-		);
-	`
-	_, err = db.Exec(createTable)
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to create table: %w", err)
-	}
-
-	return db, nil
-}
 
 func main() {
 	// Parse command line flags
@@ -105,7 +78,7 @@ func main() {
 	}
 
 	// Initialize database
-	db, err := initDB()
+	db, err := craw.InitDB()
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -123,7 +96,7 @@ func main() {
 	}
 
 	// Get existing wallpaper IDs
-	existingIDs, err := craw.GetExistingWallpaperIDs(db, "SELECT id FROM aether_gazer")
+	existingIDs, err := craw.GetExistingWallpaperIDs(db, "SELECT id, id_gallery FROM yostar_gallery WHERE type = 'aether_gazer'")
 	if err != nil {
 		log.Fatalf("Failed to get existing wallpaper IDs: %v", err)
 	}
@@ -132,13 +105,13 @@ func main() {
 	imagesToDownload := prepareImagesForDownload(wallpapers, existingIDs, contentImgPath, mobileContentImgPath)
 
 	// Create a channel for the image queue
-	queue := make(chan ImageDownload, defaultQueueSize)
+	queue := make(chan imageDownload, defaultQueueSize)
 
 	// Start workers
 	var wg sync.WaitGroup
 	for i := 0; i < defaultWorkerCount; i++ {
 		wg.Add(1)
-		go downloadWorker(queue, &wg)
+		go downloadWorker(db, queue, &wg)
 	}
 
 	// Feed the queue
@@ -156,13 +129,13 @@ func main() {
 }
 
 // fetchWallpapers retrieves the list of wallpapers from the API
-func fetchWallpapers(client *http.Client) ([]Wallpaper, error) {
+func fetchWallpapers(client *http.Client) ([]wallpaper, error) {
 	resBody, err := craw.FetchApi(client, apiListWallpaperAetherGazer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch wallpapers: %w", err)
 	}
 
-	var resApi ResponseApi
+	var resApi responseApi
 	if err = json.Unmarshal(resBody, &resApi); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON: %w", err)
 	}
@@ -171,35 +144,34 @@ func fetchWallpapers(client *http.Client) ([]Wallpaper, error) {
 }
 
 // prepareImagesForDownload prepares the list of images to download
-func prepareImagesForDownload(wallpapers []Wallpaper, existingIDs []int, contentImgPath, mobileContentImgPath string) []ImageDownload {
-	imagesToDownload := make([]ImageDownload, 0, len(wallpapers)*2) // Estimate 2 images per wallpaper
+func prepareImagesForDownload(wallpapers []wallpaper, existingIDs []string, contentImgPath, mobileContentImgPath string) []imageDownload {
+	imagesToDownload := make([]imageDownload, 0, len(wallpapers)*2) // Estimate 2 images per wallpaper
 
 	for _, wallpaper := range wallpapers {
 		// Skip if already in database
-		if craw.IntInArray(existingIDs, wallpaper.ID) {
+		if slices.Contains(existingIDs, fmt.Sprintf("%d", wallpaper.ID)) {
 			continue
 		}
 
-		// Clean filename
-		baseFileName := strings.ReplaceAll(wallpaper.Title, " ", "_")
-		baseFileName = strings.ReplaceAll(baseFileName, "/", "-")
-		baseFileName = strings.ReplaceAll(baseFileName, "\\", "-")
-
 		// Add content image if available
 		if wallpaper.ContentImg != "" {
-			imagesToDownload = append(imagesToDownload, ImageDownload{
-				URL:      wallpaper.ContentImg,
-				FileName: fmt.Sprintf("%s_%d_content", baseFileName, wallpaper.ID),
-				Path:     contentImgPath,
+			imagesToDownload = append(imagesToDownload, imageDownload{
+				IdGallery: fmt.Sprintf("%d", wallpaper.ID),
+				URL:       wallpaper.ContentImg,
+				FileName:  fmt.Sprintf("%s(%s)", wallpaper.Title, wallpaper.Creator),
+				Path:      contentImgPath,
+				Type:      "wallpaper",
 			})
 		}
 
 		// Add mobile content image if available
 		if wallpaper.MobileContentImg1 != "" {
-			imagesToDownload = append(imagesToDownload, ImageDownload{
-				URL:      wallpaper.MobileContentImg1,
-				FileName: fmt.Sprintf("%s_%d_mobile", baseFileName, wallpaper.ID),
-				Path:     mobileContentImgPath,
+			imagesToDownload = append(imagesToDownload, imageDownload{
+				IdGallery: fmt.Sprintf("%d", wallpaper.ID),
+				URL:       wallpaper.MobileContentImg1,
+				FileName:  fmt.Sprintf("%s(%s)", wallpaper.Title, wallpaper.Creator),
+				Path:      mobileContentImgPath,
+				Type:      "mobile",
 			})
 		}
 	}
@@ -208,7 +180,7 @@ func prepareImagesForDownload(wallpapers []Wallpaper, existingIDs []int, content
 }
 
 // downloadWorker downloads images from the queue
-func downloadWorker(queue <-chan ImageDownload, wg *sync.WaitGroup) {
+func downloadWorker(db *sql.DB, queue <-chan imageDownload, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for img := range queue {
@@ -218,6 +190,13 @@ func downloadWorker(queue <-chan ImageDownload, wg *sync.WaitGroup) {
 			continue
 		}
 		log.Printf(`-> download done "%s" <-`, img.FileName)
+
+		// Insert into database
+		_, err := db.Exec("INSERT INTO yostar_gallery(id_gallery, game, type, file_name, url) VALUES (?, ?, ?, ?, ?)", img.IdGallery, "aether_gazer", img.Type, img.FileName, img.URL)
+		if err != nil {
+			log.Printf("Error inserting data for %s: %v", img.FileName, err)
+			continue
+		}
 	}
 	log.Println("Worker done and exit")
 }

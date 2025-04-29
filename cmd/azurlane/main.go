@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
+	"slices"
 	"sync"
 	"time"
 
@@ -21,7 +21,6 @@ const (
 	defaultWorkerCount    = 5
 	defaultQueueSize      = 100
 	defaultRequestTimeout = 30 * time.Second
-	dbPath                = "data-azur-lane.db"
 )
 
 // ResponseApi represents the API response structure
@@ -51,40 +50,15 @@ type Wallpaper struct {
 
 // AzurLane represents a wallpaper to be downloaded
 type AzurLane struct {
-	FileName    string `json:"file_name"`
-	IdWallpaper int    `json:"id_wallpaper"`
-	Url         string `json:"url"`
+	IdGallery string `json:"id_gallery"`
+	FileName  string `json:"file_name"`
+	Url       string `json:"url"`
 }
 
 var (
-	apiListWallpaperAzurLane    = "https://azurlane.yo-star.com/api/admin/special/public-list?page_index=1&page_num=1200&type=1"
+	apiListWallpaperAzurLane    = "https://azurlane.yo-star.com/api/admin/special/public-list?page_index=1&page_num=12000&type=1"
 	domainLoadWallpaperAzurLane = "https://webusstatic.yo-star.com/"
 )
-
-// initDB initializes the SQLite database and creates the necessary tables
-func initDB() (*sql.DB, error) {
-	// Connect to the SQLite database
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
-	// Check if the table exists, if not create it
-	createTable := `
-		CREATE TABLE IF NOT EXISTS azur_lane (
-			id_wallpaper INT PRIMARY KEY,
-			file_name VARCHAR(255) NOT NULL,
-			url VARCHAR(255) NOT NULL
-		);
-	`
-	_, err = db.Exec(createTable)
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to create table: %w", err)
-	}
-
-	return db, nil
-}
 
 func main() {
 	// Parse command line flags
@@ -98,7 +72,7 @@ func main() {
 	}
 
 	// Initialize database
-	db, err := initDB()
+	db, err := craw.InitDB()
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -116,7 +90,7 @@ func main() {
 	}
 
 	// Get existing wallpaper IDs
-	existingIDs, err := craw.GetExistingWallpaperIDs(db, "SELECT id_wallpaper FROM azur_lane")
+	existingIDs, err := craw.GetExistingWallpaperIDs(db, "SELECT id, id_gallery FROM yostar_gallery WHERE type = 'azurlane'")
 	if err != nil {
 		log.Fatalf("Failed to get existing wallpaper IDs: %v", err)
 	}
@@ -164,17 +138,17 @@ func fetchWallpapers(client *http.Client, url string) ([]Wallpaper, error) {
 }
 
 // filterNewWallpapers filters out wallpapers that already exist in the database
-func filterNewWallpapers(wallpapers []Wallpaper, existingIDs []int) []AzurLane {
+func filterNewWallpapers(wallpapers []Wallpaper, existingIDs []string) []AzurLane {
 	listWallpp := make([]AzurLane, 0, len(wallpapers))
 	for _, row := range wallpapers {
-		if craw.IntInArray(existingIDs, row.ID) {
+		if slices.Contains(existingIDs, fmt.Sprintf("%d", row.ID)) {
 			continue
 		}
 
 		al := AzurLane{
-			Url:         domainLoadWallpaperAzurLane + row.Works,
-			FileName:    strings.ReplaceAll(row.Title+" ("+row.Artist+").jpeg", "/", "-"),
-			IdWallpaper: row.ID,
+			IdGallery: fmt.Sprintf("%d", row.ID),
+			Url:       domainLoadWallpaperAzurLane + row.Works,
+			FileName:  fmt.Sprintf("%s(%s)", row.Title, row.Artist),
 		}
 
 		listWallpp = append(listWallpp, al)
@@ -187,7 +161,7 @@ func crawURL(db *sql.DB, queue <-chan AzurLane, path string, wg *sync.WaitGroup)
 	defer wg.Done()
 
 	// Prepare the SQL statement once for better performance
-	insertStmt, err := db.Prepare("INSERT INTO azur_lane VALUES (?, ?, ?)")
+	insertStmt, err := db.Prepare("INSERT INTO yostar_gallery(id_gallery, game, type, file_name, url) VALUES (?, ?, ?, ?, ?)")
 	if err != nil {
 		log.Printf("Error preparing SQL statement: %v", err)
 		return
@@ -203,7 +177,7 @@ func crawURL(db *sql.DB, queue <-chan AzurLane, path string, wg *sync.WaitGroup)
 		log.Printf(`-> download done "%s" <-`, al.FileName)
 
 		// Insert into database
-		_, err := insertStmt.Exec(al.IdWallpaper, al.FileName, al.Url)
+		_, err := insertStmt.Exec(al.IdGallery, "azurlane", "wallpaper", al.FileName, al.Url)
 		if err != nil {
 			log.Printf("Error inserting data for %s: %v", al.FileName, err)
 			continue

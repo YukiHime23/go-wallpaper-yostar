@@ -141,23 +141,24 @@ func FetchApi(client *http.Client, url string) ([]byte, error) {
 }
 
 // GetExistingWallpaperIDs retrieves the IDs of wallpapers already in the database
-func GetExistingWallpaperIDs(db *sql.DB, query string) ([]int, error) {
-	ids, err := db.Query(query)
+func GetExistingWallpaperIDs(db *sql.DB, query string) ([]string, error) {
+	rows, err := db.Query(query)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return []int{}, nil
+			return []string{}, nil
 		}
 		return nil, err
 	}
-	defer ids.Close()
+	defer rows.Close()
 
-	var existingIDs []int
-	for ids.Next() {
-		var id int
-		if err := ids.Scan(&id); err != nil {
+	var existingIDs []string
+	for rows.Next() {
+		var id string
+		var id_gallery string
+		if err := rows.Scan(&id, &id_gallery); err != nil {
 			return nil, err
 		}
-		existingIDs = append(existingIDs, id)
+		existingIDs = append(existingIDs, id_gallery)
 	}
 
 	return existingIDs, nil
