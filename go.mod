@@ -1,4 +1,4 @@
-module github.com/YukiHime23/go-craw-wallpaper-ys
+module github.com/YukiHime23/go-wallpaper-yostar
 
 go 1.21.3
 

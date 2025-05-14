@@ -11,8 +11,7 @@ import (
 	"sync"
 	"time"
 
-	craw "github.com/YukiHime23/go-craw-wallpaper-ys"
-	_ "github.com/mattn/go-sqlite3"
+	ys "github.com/YukiHime23/go-wallpaper-yostar"
 )
 
 // Constants for configuration
@@ -66,13 +65,13 @@ func main() {
 	flag.Parse()
 
 	// Create output directory
-	newPath, err := craw.CreateFolder(*pathP)
+	newPath, err := ys.CreateFolder(*pathP)
 	if err != nil {
 		log.Fatalf("Failed to create folder: %v", err)
 	}
 
 	// Initialize database
-	db := craw.GetSqliteDb()
+	db := ys.GetSqliteDb()
 	defer db.Close()
 
 	// Create HTTP client with timeout
@@ -87,7 +86,7 @@ func main() {
 	}
 
 	// Get existing wallpaper IDs
-	existingIDs, err := craw.GetExistingWallpaperIDs(db, "SELECT id_gallery FROM yostar_gallery WHERE game = 'azurlane'")
+	existingIDs, err := ys.GetExistingWallpaperIDs(db, "SELECT id_gallery FROM yostar_gallery WHERE game = 'azurlane'")
 	if err != nil {
 		log.Fatalf("Failed to get existing wallpaper IDs: %v", err)
 	}
@@ -121,7 +120,7 @@ func main() {
 
 // fetchWallpapers retrieves the list of wallpapers from the API
 func fetchWallpapers(client *http.Client, url string) ([]Wallpaper, error) {
-	resBody, err := craw.FetchApi(client, url)
+	resBody, err := ys.FetchApi(client, url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch wallpapers: %w", err)
 	}
@@ -167,7 +166,7 @@ func crawURL(db *sql.DB, queue <-chan AzurLane, path string, wg *sync.WaitGroup)
 
 	for al := range queue {
 		// Download the file
-		if err := craw.DownloadFile(al.Url, al.FileName, path); err != nil {
+		if err := ys.DownloadFile(al.Url, al.FileName, path); err != nil {
 			log.Printf("Error downloading file %s: %v", al.FileName, err)
 			continue
 		}

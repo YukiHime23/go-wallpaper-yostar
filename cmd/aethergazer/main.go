@@ -12,8 +12,7 @@ import (
 	"sync"
 	"time"
 
-	craw "github.com/YukiHime23/go-craw-wallpaper-ys"
-	_ "github.com/mattn/go-sqlite3"
+	ys "github.com/YukiHime23/go-wallpaper-yostar"
 )
 
 // Constants for configuration
@@ -68,17 +67,17 @@ func main() {
 	flag.Parse()
 
 	// Create subdirectories for different image types
-	contentImgPath, err := craw.CreateFolder(filepath.Join(*pathP, "contentImg"))
+	contentImgPath, err := ys.CreateFolder(filepath.Join(*pathP, "contentImg"))
 	if err != nil {
 		log.Fatalf("Failed to create contentImg folder: %v", err)
 	}
-	mobileContentImgPath, err := craw.CreateFolder(filepath.Join(*pathP, "mobileContentImg"))
+	mobileContentImgPath, err := ys.CreateFolder(filepath.Join(*pathP, "mobileContentImg"))
 	if err != nil {
 		log.Fatalf("Failed to create mobileContentImg folder: %v", err)
 	}
 
 	// Initialize database
-	db := craw.GetSqliteDb()
+	db := ys.GetSqliteDb()
 
 	// Create HTTP client with timeout
 	client := &http.Client{
@@ -92,7 +91,7 @@ func main() {
 	}
 
 	// Get existing wallpaper IDs
-	existingIDs, err := craw.GetExistingWallpaperIDs(db, "SELECT id_gallery FROM yostar_gallery WHERE game = 'aether_gazer'")
+	existingIDs, err := ys.GetExistingWallpaperIDs(db, "SELECT id_gallery FROM yostar_gallery WHERE game = 'aether_gazer'")
 	if err != nil {
 		log.Fatalf("Failed to get existing wallpaper IDs: %v", err)
 	}
@@ -126,7 +125,7 @@ func main() {
 
 // fetchWallpapers retrieves the list of wallpapers from the API
 func fetchWallpapers(client *http.Client) ([]wallpaper, error) {
-	resBody, err := craw.FetchApi(client, apiListWallpaperAetherGazer)
+	resBody, err := ys.FetchApi(client, apiListWallpaperAetherGazer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch wallpapers: %w", err)
 	}
@@ -181,7 +180,7 @@ func downloadWorker(db *sql.DB, queue <-chan imageDownload, wg *sync.WaitGroup) 
 
 	for img := range queue {
 		// Download the file
-		if err := craw.DownloadFile(img.URL, img.FileName, img.Path); err != nil {
+		if err := ys.DownloadFile(img.URL, img.FileName, img.Path); err != nil {
 			log.Printf("Error downloading image %s: %v", img.FileName, err)
 			continue
 		}

@@ -8,7 +8,10 @@ require:
 
 # use
 aethergazer --path="something"
+
 arknights --path="something"
+
 azurlane --path="something"
+
 majhongsoul --path="something"
 
