@@ -24,3 +24,4 @@ install: `go install github.com/YukiHime23/go-wallpaper-yostar/cmd/majhongsoul@l
 
 use: `majhongsoul --path="something"`
 
+
