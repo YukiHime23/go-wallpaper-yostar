@@ -1,23 +1,26 @@
-Download yostar wallpaper
+# Download yostar wallpaper
 
-go install github.com/YukiHime23/go-wallpaper-yostar/cmd/azurlane@latest
+## azurlane
 
-go install github.com/YukiHime23/go-wallpaper-yostar/cmd/aethergazer@latest
+install: `go install github.com/YukiHime23/go-wallpaper-yostar/cmd/azurlane@latest`
 
-go install github.com/YukiHime23/go-wallpaper-yostar/cmd/arknights@latest
+use: `azurlane --path="something"`
 
-go install github.com/YukiHime23/go-wallpaper-yostar/cmd/majhongsoul@latest
+## aethergazer
 
-require:
- - golang 1.21
- - sqlite3 1.14
+install: `go install github.com/YukiHime23/go-wallpaper-yostar/cmd/aethergazer@latest`
 
-# use
-aethergazer --path="something"
+use: `aethergazer --path="something"`
 
-arknights --path="something"
+## arknights
 
-azurlane --path="something"
+install: `go install github.com/YukiHime23/go-wallpaper-yostar/cmd/arknights@latest`
 
-majhongsoul --path="something"
+use: `arknights --path="something"`
+
+## majhongsoul
+
+install: `go install github.com/YukiHime23/go-wallpaper-yostar/cmd/majhongsoul@latest`
+
+use: `majhongsoul --path="something"`
 
