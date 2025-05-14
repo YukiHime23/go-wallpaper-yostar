@@ -5,166 +5,194 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"strings"
+	"path/filepath"
+	"slices"
 	"sync"
+	"time"
 
-	"github.com/YukiHime23/go-crawal"
+	craw "github.com/YukiHime23/go-craw-wallpaper-ys"
+	_ "github.com/mattn/go-sqlite3"
 )
 
-type ResponseApi struct {
-	StatusCode int     `json:"code"`
-	Data       ResData `json:"data"`
-  Msg string `json:"msg"`
+// Constants for configuration
+const (
+	defaultPath           = "AetherGazer_Wallpaper"
+	defaultWorkerCount    = 5
+	defaultQueueSize      = 100
+	defaultRequestTimeout = 30 * time.Second
+	dbPath                = "data-aether-gazer.db"
+)
+
+// ResponseApi represents the API response structure
+type responseApi struct {
+	Code int     `json:"code"`
+	Data resData `json:"data"`
+	Msg  string  `json:"msg"`
 }
 
-type ResData struct {
+// ResData represents the data structure in the API response
+type resData struct {
 	Count int         `json:"count"`
-	Rows  []Wallpaper `json:"rows"`
+	Rows  []wallpaper `json:"rows"`
 }
 
-type Wallpaper struct {
-	ID                int     `json:"id"`
-	Title             string  `json:"title"`
-	Type              string  `json:"type"`
-	ContentImg        string  `json:"contentImg"`
-	MobileContentImg1 string  `json:"mobileContentImg1"`
-	MobileContentImg2 string  `json:"mobileContentImg2"`
-	PcThumbnail       string  `json:"pcThumbnail"`
-	MobileThumbnail   string  `json:"mobileThumbnail"`
-	StickerURL        string  `json:"stickerUrl"`
-	Creator           string  `json:"creator"`
+// Wallpaper represents a wallpaper item from the API
+type wallpaper struct {
+	ID                int    `json:"id"`
+	Title             string `json:"title"`
+	Type              string `json:"type"`
+	ContentImg        string `json:"contentImg"`
+	MobileContentImg1 string `json:"mobileContentImg1"`
+	StickerUrl        string `json:"stickerUrl"`
+	Creator           string `json:"creator"`
 }
 
-type AetherGazer struct {
-	FileName    string `json:"file_name"`
-	IdWallpaper int    `json:"id_wallpaper"`
-	Url         string `json:"url"`
+// ImageDownload represents an image to be downloaded
+type imageDownload struct {
+	IdGallery string `json:"id_gallery"`
+	URL       string `json:"url"`
+	FileName  string `json:"file_name"`
+	Path      string `json:"path"`
+	Type      string `json:"type"`
 }
 
 var (
-	ApiListWallpaperAetherGazer = "https://aethergazer.com/api/gallery/list?pageIndex=1&pageNum=1200&type=wallpaper"
+	apiListWallpaperAetherGazer = "https://aethergazer.com/api/gallery/list?pageIndex=1&pageNum=12000&type=wallpaper"
 )
 
 func main() {
-	var pathFile string
-	pathP := flag.String("path", "", "Path to the directory where wallpapers should be saved.")
+	// Parse command line flags
+	pathP := flag.String("path", defaultPath, "Path to the directory where wallpapers should be saved.")
 	flag.Parse()
-	if pathP == nil || *pathP == "" {
-		pathFile = "AetherGazer_Wallpaper"
-	} else {
-		pathFile = *pathP
-	}
 
-	newPath, err := crawal.CreateFolder(pathFile)
+	// Create subdirectories for different image types
+	contentImgPath, err := craw.CreateFolder(filepath.Join(*pathP, "contentImg"))
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to create contentImg folder: %v", err)
 	}
-
-	res, err := http.Get(ApiListWallpaperAetherGazer)
+	mobileContentImgPath, err := craw.CreateFolder(filepath.Join(*pathP, "mobileContentImg"))
 	if err != nil {
-		log.Fatal("call api error: ", err)
+		log.Fatalf("Failed to create mobileContentImg folder: %v", err)
 	}
 
-	resBody, err := io.ReadAll(res.Body)
+	// Initialize database
+	db := craw.GetSqliteDb()
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: defaultRequestTimeout,
+	}
+
+	// Fetch wallpaper list
+	wallpapers, err := fetchWallpapers(client)
 	if err != nil {
-		log.Fatal("read body error: ", err)
+		log.Fatalf("Failed to fetch wallpapers: %v", err)
 	}
 
-	var resApi ResponseApi
-	if err = json.Unmarshal(resBody, &resApi); err != nil {
-		log.Fatal("json Unmarshal error: ", err)
+	// Get existing wallpaper IDs
+	existingIDs, err := craw.GetExistingWallpaperIDs(db, "SELECT id_gallery FROM yostar_gallery WHERE game = 'aether_gazer'")
+	if err != nil {
+		log.Fatalf("Failed to get existing wallpaper IDs: %v", err)
 	}
 
-	db := crawal.GetSqliteDb()
-	createTable(db)
+	// Prepare images for download
+	imagesToDownload := prepareImagesForDownload(wallpapers, existingIDs, contentImgPath, mobileContentImgPath)
 
-	var idExist []int
-	// get id exist
-	ids, err := db.Query("SELECT id_wallpaper FROM aether_gazer")
-	if err != nil && err != sql.ErrNoRows {
-		log.Fatal("select id error: ", err)
-	}
-	defer ids.Close()
+	// Create a channel for the image queue
+	queue := make(chan imageDownload, defaultQueueSize)
 
-	var id int
-	for ids.Next() {
-		ids.Scan(&id)
-		idExist = append(idExist, id)
-	}
-
-	listWallpp := make([]AetherGazer, 0)
-	for _, row := range resApi.Data.Rows {
-		if crawal.IntInArray(idExist, row.ID) {
-			continue
-		}
-
-		var ag AetherGazer
-		ag.Url = row.ContentImg
-		ag.FileName = strings.ReplaceAll(row.Title+" ("+row.Creator+").jpeg", "/", "-")
-		ag.IdWallpaper = row.ID
-
-		listWallpp = append(listWallpp, ag)
-	}
+	// Start workers
 	var wg sync.WaitGroup
-	queue := startCraw(listWallpp)
-
-	for i := 1; i <= 5; i++ {
+	for i := 0; i < defaultWorkerCount; i++ {
 		wg.Add(1)
-		go crawURL(db, queue, newPath, &wg)
+		go downloadWorker(db, queue, &wg)
 	}
-	wg.Wait()
 
-	fmt.Println("All workers are done, exiting program.")
-	defer db.Close()
-}
-
-func createTable(db *sql.DB) {
-	// Kiểm tra xem bảng có tồn tại hay không, nếu không thì tạo mới
-	createTable := `
-		CREATE TABLE IF NOT EXISTS aether_gazer (
-			id_wallpaper INT PRIMARY KEY,
-			file_name VARCHAR(255) NOT NULL,
-			url VARCHAR(255) NOT NULL
-		);
-	`
-	_, err := db.Exec(createTable)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func crawURL(db *sql.DB, queue <-chan AetherGazer, path string, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	for al := range queue {
-		if err := crawal.DownloadFile(al.Url, al.FileName, path); err != nil {
-			log.Fatal("download file error: ", err)
-		}
-		fmt.Printf(`-> download done "%s" <-`, al.FileName)
-
-		insertData := "INSERT INTO aether_gazer VALUES (?, ?, ?)"
-		_, err := db.Exec(insertData, al.IdWallpaper, al.FileName, al.Url)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-	}
-	fmt.Println("Worker done and exit")
-}
-
-func startCraw(list []AetherGazer) <-chan AetherGazer {
-	queue := make(chan AetherGazer, 100)
-
+	// Feed the queue
 	go func() {
-		for _, v := range list {
-			queue <- v
-			fmt.Printf("File %s has been enqueued\n", v.FileName)
+		for _, img := range imagesToDownload {
+			queue <- img
+			log.Printf("Image %s has been enqueued", img.FileName)
 		}
 		close(queue)
 	}()
 
-	return queue
+	// Wait for all workers to complete
+	wg.Wait()
+	log.Println("All workers are done, exiting program.")
+}
+
+// fetchWallpapers retrieves the list of wallpapers from the API
+func fetchWallpapers(client *http.Client) ([]wallpaper, error) {
+	resBody, err := craw.FetchApi(client, apiListWallpaperAetherGazer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch wallpapers: %w", err)
+	}
+
+	var resApi responseApi
+	if err = json.Unmarshal(resBody, &resApi); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON: %w", err)
+	}
+
+	return resApi.Data.Rows, nil
+}
+
+// prepareImagesForDownload prepares the list of images to download
+func prepareImagesForDownload(wallpapers []wallpaper, existingIDs []string, contentImgPath, mobileContentImgPath string) []imageDownload {
+	imagesToDownload := make([]imageDownload, 0, len(wallpapers)*2) // Estimate 2 images per wallpaper
+
+	for _, wallpaper := range wallpapers {
+		// Skip if already in database
+		if slices.Contains(existingIDs, fmt.Sprintf("%d", wallpaper.ID)) {
+			continue
+		}
+
+		// Add content image if available
+		if wallpaper.ContentImg != "" {
+			imagesToDownload = append(imagesToDownload, imageDownload{
+				IdGallery: fmt.Sprintf("%d", wallpaper.ID),
+				URL:       wallpaper.ContentImg,
+				FileName:  fmt.Sprintf("%s(%s)", wallpaper.Title, wallpaper.Creator),
+				Path:      contentImgPath,
+				Type:      "wallpaper",
+			})
+		}
+
+		// Add mobile content image if available
+		if wallpaper.MobileContentImg1 != "" {
+			imagesToDownload = append(imagesToDownload, imageDownload{
+				IdGallery: fmt.Sprintf("%d", wallpaper.ID),
+				URL:       wallpaper.MobileContentImg1,
+				FileName:  fmt.Sprintf("%s(%s)", wallpaper.Title, wallpaper.Creator),
+				Path:      mobileContentImgPath,
+				Type:      "mobile",
+			})
+		}
+	}
+
+	return imagesToDownload
+}
+
+// downloadWorker downloads images from the queue
+func downloadWorker(db *sql.DB, queue <-chan imageDownload, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for img := range queue {
+		// Download the file
+		if err := craw.DownloadFile(img.URL, img.FileName, img.Path); err != nil {
+			log.Printf("Error downloading image %s: %v", img.FileName, err)
+			continue
+		}
+		log.Printf(`-> download done "%s" <-`, img.FileName)
+
+		// Insert into database
+		_, err := db.Exec("INSERT INTO yostar_gallery(id_gallery, game, type, file_name, url) VALUES (?, ?, ?, ?, ?)", img.IdGallery, "aether_gazer", img.Type, img.FileName, img.URL)
+		if err != nil {
+			log.Printf("Error inserting data for %s: %v", img.FileName, err)
+			continue
+		}
+	}
+	log.Println("Worker done and exit")
 }

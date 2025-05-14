@@ -2,6 +2,7 @@ package crawal
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -9,26 +10,32 @@ import (
 
 var db *sql.DB
 
+const dbPath = "yostar-gallery.db"
+
 func init() {
 	var err error
-	// Kết nối đến cơ sở dữ liệu SQLite
-	db, err = sql.Open("sqlite3", "data-azur-lane.db")
+	db, err = sql.Open("sqlite3", dbPath)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to open database: %v", err)
 	}
 
-	// Kiểm tra xem bảng có tồn tại hay không, nếu không thì tạo mới
 	createTable := `
-		CREATE TABLE IF NOT EXISTS azur_lane (
-			id_wallpaper INT PRIMARY KEY,
+		CREATE TABLE IF NOT EXISTS yostar_gallery (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			id_gallery VARCHAR(255) NOT NULL,
+			game VARCHAR(255) NOT NULL,
+			type VARCHAR(255) NOT NULL,
 			file_name VARCHAR(255) NOT NULL,
-			url VARCHAR(255) NOT NULL
+			url VARCHAR(255) NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);
 	`
 	_, err = db.Exec(createTable)
 	if err != nil {
-		log.Fatal(err)
+		db.Close()
+		log.Fatalf("failed to create table: %v", err)
 	}
+	fmt.Println("=======DB created=======")
 }
 
 func GetSqliteDb() *sql.DB {
