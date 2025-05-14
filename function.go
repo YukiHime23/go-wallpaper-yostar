@@ -153,9 +153,8 @@ func GetExistingWallpaperIDs(db *sql.DB, query string) ([]string, error) {
 
 	var existingIDs []string
 	for rows.Next() {
-		var id string
 		var id_gallery string
-		if err := rows.Scan(&id, &id_gallery); err != nil {
+		if err := rows.Scan(&id_gallery); err != nil {
 			return nil, err
 		}
 		existingIDs = append(existingIDs, id_gallery)

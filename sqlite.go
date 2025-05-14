@@ -3,6 +3,7 @@ package crawal
 import (
 	"database/sql"
 	"fmt"
+	"log"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -11,15 +12,13 @@ var db *sql.DB
 
 const dbPath = "yostar-gallery.db"
 
-// initDB initializes the SQLite database and creates the necessary tables
-func InitDB() (*sql.DB, error) {
-	// Connect to the SQLite database
-	db, err := sql.Open("sqlite3", dbPath)
+func init() {
+	var err error
+	db, err = sql.Open("sqlite3", dbPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		log.Fatalf("failed to open database: %v", err)
 	}
 
-	// Check if the table exists, if not create it
 	createTable := `
 		CREATE TABLE IF NOT EXISTS yostar_gallery (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,10 +33,9 @@ func InitDB() (*sql.DB, error) {
 	_, err = db.Exec(createTable)
 	if err != nil {
 		db.Close()
-		return nil, fmt.Errorf("failed to create table: %w", err)
+		log.Fatalf("failed to create table: %v", err)
 	}
-
-	return db, nil
+	fmt.Println("=======DB created=======")
 }
 
 func GetSqliteDb() *sql.DB {

@@ -78,11 +78,7 @@ func main() {
 	}
 
 	// Initialize database
-	db, err := craw.InitDB()
-	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
-	}
-	defer db.Close()
+	db := craw.GetSqliteDb()
 
 	// Create HTTP client with timeout
 	client := &http.Client{
@@ -96,7 +92,7 @@ func main() {
 	}
 
 	// Get existing wallpaper IDs
-	existingIDs, err := craw.GetExistingWallpaperIDs(db, "SELECT id, id_gallery FROM yostar_gallery WHERE type = 'aether_gazer'")
+	existingIDs, err := craw.GetExistingWallpaperIDs(db, "SELECT id_gallery FROM yostar_gallery WHERE game = 'aether_gazer'")
 	if err != nil {
 		log.Fatalf("Failed to get existing wallpaper IDs: %v", err)
 	}
